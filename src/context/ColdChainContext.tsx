@@ -29,6 +29,15 @@ import {
   calculateBreachPrediction,
   calculateSpoilageRiskScore,
 } from '../utils/coldchainMath';
+import {
+  testSupabaseConnection,
+  persistReadingToSupabase,
+  persistVehicleToSupabase,
+  persistAlertToSupabase,
+  persistComplianceLogToSupabase,
+  syncFullStateToSupabase,
+  SUPABASE_CONFIG,
+} from '../services/supabaseService';
 
 export type NavigationPage =
   | 'overview'
@@ -110,6 +119,19 @@ interface ColdChainContextType {
     highRiskShipmentsCount: number;
     deliveriesCompletedToday: number;
   };
+
+  // Supabase Cloud Integration
+  supabaseStatus: {
+    connected: boolean;
+    message: string;
+    latencyMs: number;
+    lastChecked: string;
+    projectId: string;
+    region: string;
+  };
+  isSyncingSupabase: boolean;
+  syncDataToSupabase: () => Promise<{ success: boolean; message: string }>;
+  refreshSupabaseStatus: () => Promise<void>;
 }
 
 const ColdChainContext = createContext<ColdChainContextType | undefined>(undefined);
@@ -132,6 +154,41 @@ export const ColdChainProvider: React.FC<{ children: ReactNode }> = ({ children 
 
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationSpeed, setSimulationSpeed] = useState(1);
+
+  // Supabase Cloud State
+  const [supabaseStatus, setSupabaseStatus] = useState({
+    connected: false,
+    message: 'Testing connection to Supabase...',
+    latencyMs: 0,
+    lastChecked: '',
+    projectId: SUPABASE_CONFIG.projectId,
+    region: SUPABASE_CONFIG.region,
+  });
+  const [isSyncingSupabase, setIsSyncingSupabase] = useState(false);
+
+  const refreshSupabaseStatus = async () => {
+    const result = await testSupabaseConnection();
+    setSupabaseStatus({
+      connected: result.connected,
+      message: result.message,
+      latencyMs: result.latencyMs,
+      lastChecked: result.lastChecked,
+      projectId: SUPABASE_CONFIG.projectId,
+      region: SUPABASE_CONFIG.region,
+    });
+  };
+
+  useEffect(() => {
+    refreshSupabaseStatus();
+  }, []);
+
+  const syncDataToSupabase = async () => {
+    setIsSyncingSupabase(true);
+    const res = await syncFullStateToSupabase(vehicles, alerts, complianceLogs);
+    await refreshSupabaseStatus();
+    setIsSyncingSupabase(false);
+    return res;
+  };
 
   // Sync selected shipment when vehicle changes
   useEffect(() => {
@@ -307,6 +364,18 @@ export const ColdChainProvider: React.FC<{ children: ReactNode }> = ({ children 
       sensorId: readingInput.sensorId,
     };
 
+    // Asynchronously sync reading & updated vehicle to Supabase
+    persistReadingToSupabase(newReading).catch(() => {});
+    const targetVeh = vehicles.find((v) => v.id === readingInput.vehicleId);
+    if (targetVeh) {
+      persistVehicleToSupabase({
+        ...targetVeh,
+        currentTemp: readingInput.internalTemp,
+        ambientTemp: readingInput.ambientTemp,
+        coolingStatus: readingInput.coolingStatus,
+      }).catch(() => {});
+    }
+
     // Update vehicle
     setVehicles((prev) =>
       prev.map((v) => {
@@ -410,6 +479,7 @@ export const ColdChainProvider: React.FC<{ children: ReactNode }> = ({ children 
           };
 
           setAlerts((prevAlerts) => [newAlert, ...prevAlerts]);
+          persistAlertToSupabase(newAlert).catch(() => {});
 
           // Update Hospital EHR inventory if risk is elevated
           setHospitalInventories((prevHosp) =>
@@ -528,6 +598,7 @@ export const ColdChainProvider: React.FC<{ children: ReactNode }> = ({ children 
       auditHash: randomHash,
     };
     setComplianceLogs((prev) => [newLog, ...prev]);
+    persistComplianceLogToSupabase(newLog).catch(() => {});
   };
 
   // Complete a delivery
@@ -687,6 +758,10 @@ export const ColdChainProvider: React.FC<{ children: ReactNode }> = ({ children 
         resetSimulation,
         setSimulationSpeed,
         dashboardStats,
+        supabaseStatus,
+        isSyncingSupabase,
+        syncDataToSupabase,
+        refreshSupabaseStatus,
       }}
     >
       {children}

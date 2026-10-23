@@ -2,5 +2,7 @@
   "name": "ColdChain AI — Smart Medicine Transportation & Spoilage Prediction",
   "description": "Enterprise cold-chain monitoring, predictive spoilage forecasting, 20-30 minute early breach warnings, route optimization, and hospital inventory integration.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
